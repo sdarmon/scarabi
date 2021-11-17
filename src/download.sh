@@ -6,5 +6,7 @@ ech="SRR8257103 SRR8257106"
 
 for i in $ech
 do 
-parallel-fastq-dump --sra-id SRR8257103 --threads 8 --outdir ../data/ --split-files --gzip
+parallel-fastq-dump --sra-id $i --threads 8 --outdir ../data/ --split-files --gzip
+rm ../data/${i}_3.fastq.gz
 done
+
