@@ -2,4 +2,4 @@
 
 cd ~/mydatalocal/scarabi
 
-fastqc -o results/ -t 6 data/*.fastq.gz
+fastqc -o results/output_fastqc/ -t 6 data/*.fastq.gz
