@@ -1,157 +1,187 @@
+# TP GNS : ScaraBIS ou l'études des matrices de comptes
 
-```{r}
+## Les Librairies
+
+La plupart des difficultés d'installation des librairies venaient de uwot, dont une version précédente était nécessaire et le couple SeuratWrappers et monocle3 dont leur installation demandent un token. Afin d'obtenir le token, je vous conseille de regarder ce guide https://gist.github.com/z3tt/3dab3535007acf108391649766409421 .
+Une fois le token bien enregistré dans .Renviron et R redémarré, la série suivante d'installations devrait permettre l'installation des packages problématiqes:
+
+```
+install.packages("devtools")
+library(devtools)
+devtools::install_version("uwot", version = "0.1.10", repos = "http://cran.us.r-project.org")
+library(uwot)
+install.packages("Seurat")
+library(Seurat)
+
+BiocManager::install("Rsamtools")
+install.packages("R.utils")
+library(Rsamtools)
+library(R.utils)
+remotes::install_github('satijalab/seurat-wrappers')
+library(SeuratWrappers)
+devtools::install_github('cole-trapnell-lab/leidenbase')
+BiocManager::install("limma")
+BiocManager::install("batchelor")
+library(limma)
+librairy(batchelor)
+devtools::install_github('cole-trapnell-lab/monocle3')
+library(monocle3)
+```
+
+Pour toutes les libraries restantes, un simple ```install.packages("...")``` suffira.
+
+```{r, warning = FALSE, message=FALSE}
+#devtools::install_version("uwot", version = "0.1.10", repos = "http://cran.us.r-project.org")
+library(uwot)
 library(Seurat)
 library(tximport)
 library(ggplot2)
 library(corrplot)
 library(network)
-#BiocManager::install("Rsamtools")
-#install.packages("Signac")
 library(Signac)
-#remotes::install_github('satijalab/seurat-wrappers')
-#install.packages("R.utils")
 library(SeuratWrappers)
-#install.packages("devtools")
-#devtools::install_github('cole-trapnell-lab/leidenbase')
-#BiocManager::install("limma")
-#BiocManager::install("batchelor")
-#devtools::install_github('cole-trapnell-lab/monocle3')
 library(monocle3)
 library(Matrix)
 library(patchwork)
-#devtools::install_version("uwot", version = "0.1.10", repos = "http://cran.us.r-project.org")
-library(uwot)
+library(gridExtra)
 set.seed(1234)
 setwd("~/mydatalocal/scarabi/results")
 ```
 
-```{r}
+## Récupération des données
 
-samps <- c("SRR8257100","SRR8257101","SRR8257102","SRR8257103","SRR8257104","SRR8257105","SRR8257106")
-```
+Récupération des matrices des 7 échantillons:
 
-# path to the output directory of Alevin quant run 
-```{r}
+```{r, warning = FALSE, message=FALSE}
+sampsf <- c("SRR8257100","SRR8257101","SRR8257102","SRR8257103","SRR8257104","SRR8257105","SRR8257106")
+
 files <- file.path(
-  paste("~/mydatalocal/scarabi/data/quant/",samps,"/alevin/quants_mat.gz", sep=""))
-file.exists(files)
+  paste("~/mydatalocal/scarabi/data/quant/",sampsf,"/alevin/quants_mat.gz", sep=""))
 
-```
-
-```{r}
 txis <- lapply(files, function(f) tximport(files = f, type="alevin"))
-
 ```
-```{r}
 
+Création des objects Seurat associés :
+
+```{r}
 seu_objs <- lapply(seq_along(txis), function(i){
   # min.cells = 3, min.features = 200 from Ryu et al.
-  s <- CreateSeuratObject(counts = txis[[i]]$counts , min.cells = 3, min.features = 200, project = samps[i]) 
+  s <- CreateSeuratObject(counts = txis[[i]]$counts , min.cells = 3, min.features = 200, project = sampsf[i]) 
   })
 ```
 
+Pour l'instant, on le récupère que les samples du Wild Type (non mutants):
 
-#Marie's edit here
 ```{r}
-scarabWT <- merge(x = seu_objs[[1]], y = unlist(seu_objs[2:4], recursive = F), add.cell.ids = samps[1:4])
-
+scarabWT <- merge(x = seu_objs[[1]], y = unlist(seu_objs[2:4], recursive = F), add.cell.ids = sampsf[1:4])
 ```
+
+
+
+## Etudes et pré-traitements de nos données
+
+Ensuite, on étudie nos échantillons afin de ne conserver qu'une partie de nos données, en enlevant les données ne nous semblant pas significatives:
 
 ```{r}
 scarabWT[["percent.mt"]] <- PercentageFeatureSet(scarabWT, pattern = "ATM")
 scarabWT[["percent.chloro"]] <- PercentageFeatureSet(scarabWT, pattern = "ATC")
-```
-
-```{r}
 quant <- quantile(scarabWT[["percent.mt"]]$percent.m,0.95 )
-```
-```{r}
 scarabWT <-subset(scarabWT, subset =  percent.mt < quant & percent.chloro < 0.2)
 ```
 
-```{r}
-VlnPlot(scarabWT, features = c("nFeature_RNA", "nCount_RNA", "percent.mt","percent.chloro"), ncol = 4)
-```
-```{r}
+Voici le résultat obtenu :
 
+```{r, warning = FALSE, message=FALSE}
+VlnPlot(scarabWT, features = c("nFeature_RNA", "nCount_RNA", "percent.mt","percent.chloro"), ncol = 4)
 plot1 <- FeatureScatter(scarabWT, feature1 = "nCount_RNA", feature2 = "percent.mt")
 plot2 <- FeatureScatter(scarabWT, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
 CombinePlots(plots = list(plot1, plot2))
 ```
 
-```{r}
+Ensuite, on normalise nos données et l'on garde qu'un certain nombre nombre (pour ma version, 2000) des cellules les plus intéressantes:
+
+```{r, warning = FALSE, message=FALSE}
 scarabWT <- NormalizeData(scarabWT, normalization.method = "LogNormalize", scale.factor = 10000)
-```
-```{r}
-scarabWT <- FindVariableFeatures(scarabWT, selection.method = "vst", nfeatures = 2000)
+nb_cells = 2000
+scarabWT <- FindVariableFeatures(scarabWT, selection.method = "vst", nfeatures = nb_cells)
 ```
 
-```{r}
+Maintenant, on lance une ACP sur nos données : 
+
+```{r, warning = FALSE, message=FALSE}
 all.genes <- rownames(scarabWT)
 scarabWT <- ScaleData(scarabWT, features = all.genes)
-```
-
-```{r}
 scarabWT <- RunPCA(scarabWT, features = VariableFeatures(object = scarabWT))
 ```
 
-```{r}
-VizDimLoadings(scarabWT, dims = 1:2, reduction = "pca")
-```
-```{r}
-DimPlot(scarabWT, reduction = "pca")
-```
+Et l'on obtient ceci :
 
 ```{r}
+VizDimLoadings(scarabWT, dims = 1:2, reduction = "pca")
+DimPlot(scarabWT, reduction = "pca")
 DimHeatmap(scarabWT, dims = 1:15, cells = 500, balanced = TRUE)
 ```
 
-```{r}
-DimHeatmap(scarabWT, dims = 1:15, cells = 200, balanced = TRUE)
-```
+L'étude des composantes principales a pour but de déterminer la dimension de notre problème. Afin de pouvoir déterminer le plus de types cellulaires possibles dans nos données, il est préférable d'avoir une dimension élevée. Cependant, chaque nouvelle composante principale doit aussi avoir un intérêt à discriminer nos données et doit donc être significative. Alors, pour se faire, on utilise deux analyses supplémentaires : JackStraw et l'ElbowPlot. Voici les graphiques obtenues : 
 
-```{r, eval = FALSE}
+```{r, warning = FALSE, message=FALSE}
 scarabWT <- JackStraw(scarabWT, num.replicate = 100)
 scarabWT <- ScoreJackStraw(scarabWT, dims = 1:20)
 ```
-```{r, eval = FALSE}
+```{r, warning = FALSE, message=FALSE}
 JackStrawPlot(scarabWT, dims = 1:15, xmax = 1, ymax = 1)
-```
-```{r}
 ElbowPlot(scarabWT)
 ```
+Ce que l'on y obverse sur l'ElbowPlot est à partir de la 10ème composante principale, les suivantes ne sont plus si intéressantes que ça. On a donc décidé (arbitrairement) de se restreindre à une dimension de 10.
 
-```{r}
+## Génération des cartes UMAP
+
+Afin de générer la carte UMAP (avec RunUMAP), on a besoin au préalable de convertir nos données en clusters, via un graphe pondéré en calculant les voisins de chaque cellules.
+
+```{r, warning = FALSE, message=FALSE}
 scarabWT <- FindNeighbors(scarabWT, dims = 1:10)
 scarabWT <- FindClusters(scarabWT, resolution = 0.8)
+scarabWT <- RunUMAP(scarabWT, dims = 1:5, return.model = TRUE, umap.method = "uwot-learn")
+```
+On obtient alors les résultats suivants :
+```{r, warning = FALSE, message=FALSE}
+p8 <-DimPlot(scarabWT, reduction = "umap")
+p8
+ggsave(p8,file = "~/mydatalocal/scarabi/results/image/UMAP.png",width=30,height=15,units="cm")
+```
+# Annotation de la carte UMAP
+
+Afin d'annoter la carte UMAP en associant les différentes régions avec des types cellulaires, nous avons utilisé deux méthodes.
+
+## 1ère méthode : via les marqueurs génétques
+
+Le but de cette méthode est d'utiliser des marqueurs génétiques pour nos différents types cellulaires.
+
+```{r , warning = FALSE, message=FALSE}
+Markers = read.csv("../data/Markers.csv", sep = '\t', h=T)
+Table = table(Markers$Preferential.expression.in.root)
 ```
 
-```{r}
-scarabWT <- RunUMAP(scarabWT, dims = 1:5, return.model = TRUE)
-```
-```{r}
-DimPlot(scarabWT, reduction = "umap")
-```
-```{r}
-Markers = read.csv("../data/Markers.csv", sep = '\t', h=T)
-Markers
-```
-```{r}
-Table = table(Markers$Preferential.expression.in.root)
+Voici le tableau représant le nombre de marqueurs par type cellulaire :
+
+```{r, warning = FALSE, message=FALSE}
 Table
 ```
-```{r}
+
+Ensuite, pour chacun des types cellulaires, on affiche sur la carte UMAP seulement l'expression des gènes de ce type cellulaire.
+
+```{r, warning = FALSE, message=FALSE}
 Markers$Locus<-gsub(" ","",Markers$Locus)
 Markers$Preferential.expression.in.root<-gsub("/"," ",Markers$Preferential.expression.in.root)
 
 lm<-split(Markers,Markers$Preferential.expression.in.root)
 
 
-system("mkdir -p image")
-system("rm -r image/*")
+system("mkdir -p ~/mydatalocal/scarabi/results/image")
+system("rm -r ~/mydatalocal/scarabi/results/image/*")
 
 output <- lapply(names(lm),function(x){f<-FeaturePlot(scarabWT, features = lm[[x]]$Locus)
-  ggsave(f,file=paste0("image/",x,".png"),width=40,height=40,units="cm")
+  ggsave(f,file=paste0("~/mydatalocal/scarabi/results/image/",x,".png"),width=40,height=40,units="cm")
   })
 
 datascore <- data.frame(lapply(names(lm),function(x){score=colMeans(scarabWT@assays$RNA[lm[[x]]$Locus,])
@@ -159,54 +189,49 @@ datascore <- data.frame(lapply(names(lm),function(x){score=colMeans(scarabWT@ass
 names(datascore)<-make.names(names(lm))
 scarabWT <- AddMetaData(scarabWT, metadata = datascore)
 g<-FeaturePlot(scarabWT, features=names(datascore))
-ggsave(g,file = "image/type_cellulaire.png",width=40,height=40,units="cm")
+g
+ggsave(g,file = "~/mydatalocal/scarabi/results/image/type_cellulaire.png",width=40,height=40,units="cm")
 
 ```
-```{r}
+## 2nd méthode : via des échantillons des régions associées
+
+Via des prélévements on a aussi accès à l'expression des gènes par type cellulaire
+```{r, warning = FALSE, message=FALSE}
 samps<-read.table("~/mydatalocal/scarabi/data/Counts_Salmon/metadata_Li2016.txt", sep="\t")
 #On trie les samples par types cellulaires
 samps <- samps[order(samps$V3),]
 #On supprime les types cellulaires non déterminants
 samps <- samps[!samps$V3%in%c("whole root","whole root 1","cycloheximide treatment","cycloheximide mock"),]
-samps
 ech<-samps$V1
-ech
 ```
-```{r}
+Ensuite, pour chacun de ces samples on récupère les matrices de compte et via à une table, on réassocie ensemble les noms des gènes.
+```{r, warning = FALSE, message=FALSE}
 files <- file.path(
   paste("~/mydatalocal/scarabi/data/Counts_Salmon/",ech,"/quant.sf", sep=""))
 files<-files[file.exists(files)]
-files
-```
-```{r}
 tx2gene<-read.table("~/mydatalocal/scarabi/processed_data/txp2gene.tsv")
 names(tx2gene)<-c("TXNAME","GENEID")
 tx2gene<-unique(tx2gene)
 head(tx2gene)
 ```
+On peut alors récupérer les données et on obtient alors la matrice de compte (normalisée) suivante :
 
-
-```{r}
+```{r, warning = FALSE, message=FALSE}
 txis <- lapply(files, function(f) {
   tab<- tximport(files = f, type="salmon", tx2gene=tx2gene)
   return(tab$abundance)
   })
 tabpur<-as.data.frame(txis)
-```
-```{r}
 ech2=sapply(files,function(f){strsplit(f,"/")[[1]][6]})
-
 #Changer le nom des colonnes du tableau 
 names(tabpur)<-make.names(ech2)
 head(tabpur)
 ```
-
-```{r}
-#Pour chaque cluster, on regarde l'expression moyenne des gènes dans le cluster
+Enfin, pour chaque cluster, on regarde l'expression moyenne des gènes dans le cluster. Puis on ne garde que les gènes en commun, on calcule la matrice de corrélation entre les clusters et les samples et finalement on change le nom des samples (aux colonnes) par le type cellulaire associé. On obtient alors ceci :
+```{r, warning = FALSE, message=FALSE}
 avg.e <- AverageExpression(scarabWT)
 scarabWT_avg=data.frame(avg.e)
 
-#On fait attention aux noms des gènes présents, car on n'a pas exactement les mêmes
 genes_scarabi <- rownames(scarabWT_avg)
 genes_li <- rownames(tabpur)
 genes_common <- genes_scarabi[genes_scarabi%in%genes_li]
@@ -214,244 +239,105 @@ genes_common <- genes_scarabi[genes_scarabi%in%genes_li]
 countsLi_norm_avg_alt_sum_c <- tabpur[genes_common,]
 scarabWT_avg_c <- scarabWT_avg[genes_common,]
 
-#Librairie nécessaire pour faire la corrélation
-#install.packages("corrplot")
-#install.packages("network")
-
-#On calcule la matrice de corrélation entre les clusters et les samples
 corLi_scarab_spearman <- cor(scarabWT_avg_c,countsLi_norm_avg_alt_sum_c,method="spearman")
 
-#On change le nom des samples (aux colonnes) par le type cellulaire associé.
 colnames(corLi_scarab_spearman) <- lapply(colnames(corLi_scarab_spearman), function(name){samps[samps$V1==name,3]})
 
 corrplot(corLi_scarab_spearman, method="color", is.corr=F, tl.col = as.color(colnames(corLi_scarab_spearman)) )
 ```
-```{r}
+Alors, pour chaque cluster, en prennant par exemple le type cellulaire avec la plus grande expression, on peut annoter la carte UMAP :
+
+```{r, warning = FALSE, message=FALSE}
 cluster.id <- max.col(corLi_scarab_spearman)
 cluster.id  <- colnames(corLi_scarab_spearman)[cluster.id]
-cluster.id 
-```
-```{r}
 names(cluster.id) <- levels(scarabWT)
-cluster.id
 scarabWT <- RenameIdents(scarabWT, cluster.id)
-DimPlot(scarabWT, reduction = "umap", label = TRUE, pt.size = 0.5) + NoLegend()
+p7 <- DimPlot(scarabWT, reduction = "umap", label = TRUE, pt.size = 0.5) + NoLegend()
+p7
+ggsave(p7,file = "~/mydatalocal/scarabi/results/image/UMAP_label.png",width=15,height=15,units="cm")
 ```
+# Etude du mutant 
 
-```{r}
-
-samps <- c("SRR8257100","SRR8257101","SRR8257102","SRR8257103","SRR8257104","SRR8257105","SRR8257106")
-```
-
-# path to the output directory of Alevin quant run 
-```{r}
-files <- file.path(
-  paste("~/mydatalocal/scarabi/data/quant/",samps,"/alevin/quants_mat.gz", sep=""))
-file.exists(files)
-
-```
-
-```{r}
-txi <- tximport(files = files[6], type="alevin")
-```
-```{r}
-  scarabmut <- CreateSeuratObject(counts = txi$counts , min.cells = 3, min.features = 200, project = samps[6]) 
-```
-
-
-#Marie's edit here
-```{r}
+Afin de comparaitre nos mutants avec le Wild Type, on recommence toutes les opérations jusqu'à réobtenir la carte UMAP :
+```{r, warning = FALSE, message=FALSE}
+files <- file.path(  paste("~/mydatalocal/scarabi/data/quant/SRR8257105/alevin/quants_mat.gz", sep=""))
+txi <- tximport(files = files, type="alevin")
+  scarabmut <- CreateSeuratObject(counts = txi$counts , min.cells = 3, min.features = 200, project = sampsf[6]) 
 scarabmut[["percent.mt"]] <- PercentageFeatureSet(scarabmut, pattern = "ATM")
 scarabmut[["percent.chloro"]] <- PercentageFeatureSet(scarabmut, pattern = "ATC")
-```
-
-```{r}
 quant <- quantile(scarabmut[["percent.mt"]]$percent.m,0.95 )
-```
-```{r}
 scarabmut <-subset(scarabmut, subset =  percent.mt < quant & percent.chloro < 0.2)
-```
-
-```{r}
-VlnPlot(scarabmut, features = c("nFeature_RNA", "nCount_RNA", "percent.mt","percent.chloro"), ncol = 4)
-```
-```{r}
-
-plot1 <- FeatureScatter(scarabmut, feature1 = "nCount_RNA", feature2 = "percent.mt")
-plot2 <- FeatureScatter(scarabmut, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
-CombinePlots(plots = list(plot1, plot2))
-```
-
-```{r}
 scarabmut <- NormalizeData(scarabmut, normalization.method = "LogNormalize", scale.factor = 10000)
-```
-```{r}
 scarabmut <- FindVariableFeatures(scarabmut, selection.method = "vst", nfeatures = 2000)
-```
-
-```{r}
 all.genes <- rownames(scarabmut)
 scarabmut <- ScaleData(scarabmut, features = all.genes)
-```
-
-```{r}
 scarabmut <- RunPCA(scarabmut, features = VariableFeatures(object = scarabmut))
-```
-
-```{r}
-VizDimLoadings(scarabmut, dims = 1:2, reduction = "pca")
-```
-```{r}
-DimPlot(scarabmut, reduction = "pca")
-```
-
-```{r}
-DimHeatmap(scarabmut, dims = 1:15, cells = 500, balanced = TRUE)
-```
-
-```{r}
-DimHeatmap(scarabmut, dims = 1:15, cells = 200, balanced = TRUE)
-```
-
-```{r, eval = FALSE}
-scarabmut <- JackStraw(scarabmut, num.replicate = 100)
-scarabmut <- ScoreJackStraw(scarabmut, dims = 1:20)
-```
-```{r, eval = FALSE}
-JackStrawPlot(scarabmut, dims = 1:15, xmax = 1, ymax = 1)
-```
-```{r}
-ElbowPlot(scarabmut)
-```
-
-```{r}
 scarabmut <- FindNeighbors(scarabmut, dims = 1:10)
 scarabmut <- FindClusters(scarabmut, resolution = 0.8)
-```
-
-```{r}
-scarabmut <- RunUMAP(scarabmut, dims = 1:5, return.model = TRUE)
-```
-```{r}
-DimPlot(scarabmut, reduction = "umap")
-```
-```{r}
-Markers = read.csv("../data/Markers.csv", sep = '\t', h=T)
-Markers
-```
-```{r}
-Table = table(Markers$Preferential.expression.in.root)
-Table
-```
-
-```{r}
-samps<-read.table("~/mydatalocal/scarabi/data/Counts_Salmon/metadata_Li2016.txt", sep="\t")
-#On trie les samples par types cellulaires
-samps <- samps[order(samps$V3),]
-#On supprime les types cellulaires non déterminants
-samps <- samps[!samps$V3%in%c("whole root","whole root 1","cycloheximide treatment","cycloheximide mock"),]
-samps
-ech<-samps$V1
-ech
-```
-```{r}
-files <- file.path(
-  paste("~/mydatalocal/scarabi/data/Counts_Salmon/",ech,"/quant.sf", sep=""))
-files<-files[file.exists(files)]
-files
-```
-```{r}
-tx2gene<-read.table("~/mydatalocal/scarabi/processed_data/txp2gene.tsv")
-names(tx2gene)<-c("TXNAME","GENEID")
-tx2gene<-unique(tx2gene)
-head(tx2gene)
-```
-
-
-```{r}
-txis <- lapply(files, function(f) {
-  tab<- tximport(files = f, type="salmon", tx2gene=tx2gene)
-  return(tab$abundance)
-  })
-tabpur<-as.data.frame(txis)
-```
-```{r}
-ech2=sapply(files,function(f){strsplit(f,"/")[[1]][6]})
-
-#Changer le nom des colonnes du tableau 
-names(tabpur)<-make.names(ech2)
-head(tabpur)
-```
-
-```{r}
-#Pour chaque cluster, on regarde l'expression moyenne des gènes dans le cluster
+scarabmut <- RunUMAP(scarabmut, dims = 1:5, return.model = TRUE, umap.method = "uwot-learn")
+p6 <-DimPlot(scarabmut, reduction = "umap")
+p6
+ggsave(p6,file = "~/mydatalocal/scarabi/results/image/UMAP_mut.png",width=30,height=15,units="cm")
 avg.e <- AverageExpression(scarabmut)
 scarabmut_avg=data.frame(avg.e)
-
-#On fait attention aux noms des gènes présents, car on n'a pas exactement les mêmes
 genes_scarabi <- rownames(scarabmut_avg)
 genes_li <- rownames(tabpur)
 genes_common <- genes_scarabi[genes_scarabi%in%genes_li]
-
 countsLi_norm_avg_alt_sum_c <- tabpur[genes_common,]
 scarabmut_avg_c <- scarabmut_avg[genes_common,]
-
-#Librairie nécessaire pour faire la corrélation
-#install.packages("corrplot")
-#install.packages("network")
-
-#On calcule la matrice de corrélation entre les clusters et les samples
 corLi_scarab_spearman <- cor(scarabmut_avg_c,countsLi_norm_avg_alt_sum_c,method="spearman")
-
-#On change le nom des samples (aux colonnes) par le type cellulaire associé.
 colnames(corLi_scarab_spearman) <- lapply(colnames(corLi_scarab_spearman), function(name){samps[samps$V1==name,3]})
-
 corrplot(corLi_scarab_spearman, method="color", is.corr=F, tl.col = as.color(colnames(corLi_scarab_spearman)) )
-```
-```{r}
-cluster.id <- max.col(corLi_scarab_spearman)
-cluster.id  <- colnames(corLi_scarab_spearman)[cluster.id]
-cluster.id 
-```
-```{r}
-names(cluster.id) <- levels(scarabmut)
-cluster.id
-scarabmut <- RenameIdents(scarabmut, cluster.id)
-DimPlot(scarabmut, reduction = "umap", label = TRUE, pt.size = 0.5) + NoLegend()
+cluster.id2 <- max.col(corLi_scarab_spearman)
+cluster.id2  <- colnames(corLi_scarab_spearman)[cluster.id2]
+names(cluster.id2) <- levels(scarabmut)
+scarabmut <- RenameIdents(scarabmut, cluster.id2)
+p5 <- DimPlot(scarabmut, reduction = "umap", label = TRUE, pt.size = 0.5) + NoLegend()
+p5
+ggsave(p5,file = "~/mydatalocal/scarabi/results/image/UMAP_mut_Label.png",width=30,height=15,units="cm")
 ```
 
-```{r}
+# Comparaison entre le Wild Type et le mutant
+
+Maintenant que l'on a les cartes UMAP des deux, un moyen intéressant de les comparer est de projeter les cellules et cluster du mutant sur la carte du Wild Type. On obtient alors ceci :
+
+```{r, warning = FALSE, message=FALSE}
 scarab.anchors <- FindTransferAnchors(reference = scarabWT, query = scarabmut,
                                       dims = 1:30, reference.reduction = "pca")
 
 scarabmut <- MapQuery(anchorset = scarab.anchors, reference = scarabWT, query = scarabmut,
                        reference.reduction = "pca", reduction.model = "umap")
 
-pbmc.atac.filtered$predicted.id <- factor(pbmc.atac.filtered$predicted.id, levels = levels(pbmc.rna))  # to make the colors match
-  
 p1 <- DimPlot(scarabWT, reduction = "umap", group.by = "seurat_clusters", label = TRUE, label.size = 3,
               repel = TRUE) + NoLegend() + ggtitle("Reference annotations")
-p2 <- DimPlot(scarabmut, reduction = "ref.umap", group.by = "predicted.id", label = TRUE,
+p2 <- DimPlot(scarabmut, reduction = "ref.umap", group.by = "seurat_clusters", label = TRUE,
               label.size = 3, repel = TRUE, split.by = "orig.ident") + NoLegend() + ggtitle("Query transferred labels")
 p1 + p2
+ggsave(p1+p2,file = "~/mydatalocal/scarabi/results/image/projection_mutant.png",width=30,height=15,units="cm")
 ```
 
-```{r}
-scarabWT[["UMAP"]] <- scarabWT[["umap"]]
-# To save on memory, you can delete the original UMAP, but this is not necessary
-scarabWT[["umap"]] <- NULL
+Comme on peut l'observer, toute la partie poilue a disparu chez le mutant. Alors, une analyse supplémentaire est possible : on peut étudier le processus de différentiation des cellules de ce groupe via le PseudoTime.
 
-scarabWT.cds <- as.cell_data_set(scarabWT)
-scarabWT.cds <- cluster_cells(cds = scarabWT.cds, reduction_method = "UMAP")
-scarabWT.cds <- learn_graph(scarabWT.cds, use_partition = TRUE)
-```
-```{r}
- hsc <- c("SRR8257100_CCACTACCAAGTTGTC","SRR8257100_CGAATGTTCAGGTAAA")
-scarabWT.cds <- order_cells(scarabWT.cds, reduction_method = "UMAP", root_cells = hsc)
-plot_cells(
-  cds = scarabWT.cds,
-  color_cells_by = "pseudotime",
-  show_trajectory_graph = TRUE
+```{r, warning = FALSE, message=FALSE}
+atricho.cds <- scarabWT[, scarabWT$seurat_clusters %in% c(15,11,6,9,17)]
+atricho.cds <- as.cell_data_set(atricho.cds)
+atricho.cds <- cluster_cells(cds = atricho.cds, reduction_method = "UMAP")
+atricho.cds <- learn_graph(atricho.cds, use_partition = TRUE)
+# meristem to root
+meristemcells <- names(scarabWT$seurat_clusters[scarabWT$seurat_clusters==17])
+atricho.cds <- order_cells(atricho.cds, reduction_method = "UMAP", root_cells = meristemcells[22:22])
+scarabWT <- AddMetaData(
+  object = scarabWT,
+  metadata = atricho.cds@principal_graph_aux@listData$UMAP$pseudotime,
+  col.name = "Trichoblast"
 )
+p=FeaturePlot(scarabWT, c("Trichoblast"), pt.size = 0.1)
+p3 <- plot_cells(
+  cds = atricho.cds,
+  color_cells_by = "pseudotime",
+  label_branch_points=FALSE,
+  show_trajectory_graph = TRUE,
+)
+ggsave(grid.arrange(p, p3, ncol=2),file="~/mydatalocal/scarabi/results/image/peudoTime.png",width = 10, height = 5)
 ```
 

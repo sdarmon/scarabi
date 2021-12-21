@@ -1,3 +1,5 @@
+#Ce script permet de télécharger les matrices de compte de plusieurs samples ainsi qu'un fichier "metadata_Li2016.txt" résumant les données.
+
 cd ~/mydatalocal/scarabi/data
 
 mkdir -p ~/mydatalocal/scarabi/data/Counts_Salmon
